@@ -1,22 +1,23 @@
-# Vitrine Mobile — aplicativo de vendas em React Native
+# Vitrine Mobile — guia para criar um app de vendas
 
-Guia passo a passo para criar uma vitrine de produtos inspirada em lojas on-line. A proposta usa **Expo + React Native + TypeScript**, a API pública do [DummyJSON](https://dummyjson.com/docs/products) para carregar produtos e **SQLite local** para persistir favoritos e carrinho. Assim, o projeto demonstra integração com API e banco de dados sem exigir credenciais de serviços pagos.
+Este README apresenta um passo a passo para desenvolver um aplicativo de catálogo de produtos com **React Native, Expo e TypeScript**. O exemplo usa a API pública do [DummyJSON](https://dummyjson.com/docs/products) para obter produtos e o **SQLite local** para salvar favoritos e itens do carrinho.
 
-> Personalize nome, identidade visual, categorias e conteúdo. Não copie uma loja existente: crie uma experiência original para o trabalho.
+> A proposta é servir como ponto de partida para um projeto original. Personalize o nome, o visual, as categorias e as funcionalidades; não copie a identidade de uma loja existente.
 
-## O que será construído
+## O que o app deverá ter
 
-- Tela inicial com produtos, imagens, preço, busca e categorias.
-- Tela de detalhes do produto.
-- Favoritos e carrinho persistidos no SQLite.
-- Carregamento assíncrono, paginação sob demanda e estados de carregamento/erro.
-- Layout que se adapta à largura e à rotação do aparelho.
-- Imagens redimensionadas/comprimidas antes de salvar conteúdo local.
-- Checklist para medir e relatar a performance.
+- Tela inicial com busca, categorias e catálogo de produtos.
+- Imagens, preços e descrições dos produtos, além de uma tela de detalhes.
+- API para consultar os produtos e paginação para carregar mais itens sob demanda.
+- Banco SQLite local para favoritos e carrinho.
+- Tratamento de carregamento, erros de rede e listas vazias.
+- Layout que se adapta a diferentes tamanhos de tela e à rotação.
+- Imagens dimensionadas para a tela e, se houver upload, comprimidas antes do envio.
+- Testes e relatório de análise de performance.
 
-## 1. Pré-requisitos
+## 1. Prepare o ambiente
 
-Instale [Node.js LTS](https://nodejs.org/), Git e o aplicativo **Expo Go** no celular, ou um emulador Android/iOS. Para gerar builds nativos, instale também as ferramentas indicadas no [guia do Expo](https://docs.expo.dev/get-started/set-up-your-environment/).
+Instale [Node.js LTS](https://nodejs.org/), Git e o [Expo Go](https://expo.dev/go) no celular. Também é possível executar o projeto em um emulador Android ou iOS; para builds nativos, siga os requisitos da plataforma na documentação do Expo.
 
 Confira as instalações:
 
@@ -25,16 +26,16 @@ node --version
 npm --version
 ```
 
-## 2. Crie o projeto Expo
+## 2. Crie o projeto e instale as dependências
 
-No terminal, a partir da pasta onde deseja desenvolver:
+No terminal, navegue até a pasta onde deseja guardar o projeto e execute:
 
 ```bash
 npx create-expo-app@latest vitrine-mobile --template blank-typescript
 cd vitrine-mobile
 ```
 
-Instale as dependências:
+Instale as bibliotecas usadas no exemplo:
 
 ```bash
 npx expo install expo-sqlite expo-image expo-image-manipulator
@@ -42,33 +43,35 @@ npm install @react-navigation/native @react-navigation/native-stack
 npx expo install react-native-screens react-native-safe-area-context
 ```
 
-Inicie o servidor e leia o QR code com o Expo Go:
+Inicie o servidor de desenvolvimento:
 
 ```bash
 npx expo start
 ```
 
-## 3. Organize os arquivos
+Leia o QR code com o Expo Go, ou escolha um emulador disponível no terminal do Expo.
 
-Crie uma estrutura simples, separando telas, componentes, acesso a dados e modelos:
+## 3. Organize o código
+
+Crie pastas para separar telas, componentes e integrações. Por exemplo:
 
 ```text
 vitrine-mobile/
 ├── App.tsx
 └── src/
-    ├── components/       # Cartão, busca, indicador de carregamento
-    ├── database/          # Inicialização e operações SQLite
-    ├── navigation/        # Rotas e tipos de navegação
-    ├── screens/           # Início, detalhes e favoritos/carrinho
-    ├── services/          # Cliente HTTP e chamadas à API
-    └── types/             # Tipos TypeScript
+    ├── components/       # Cartão de produto, busca, mensagens de estado
+    ├── database/         # Inicialização e operações SQLite
+    ├── navigation/       # Rotas e tipos da navegação
+    ├── screens/          # Início, detalhes e favoritos/carrinho
+    ├── services/         # Requisições HTTP à API
+    └── types/            # Tipos TypeScript compartilhados
 ```
 
-Mantenha componentes pequenos. A tela não deve fazer diretamente consultas SQL e requisições HTTP; delegue essas tarefas a `database/` e `services/`.
+Mantenha as telas focadas na interface. Deixe requisições HTTP em `services/` e consultas ao banco em `database/`; isso facilita testar e manter o aplicativo.
 
-## 4. Defina o tipo de produto e conecte à API
+## 4. Modele os produtos
 
-O DummyJSON oferece dados de demonstração e paginação. Crie `src/types/Product.ts`:
+Crie `src/types/Product.ts` com os campos necessários para exibir um produto:
 
 ```ts
 export type Product = {
@@ -82,28 +85,44 @@ export type Product = {
 };
 ```
 
-Crie `src/services/products.ts` para solicitar uma página de produtos. O parâmetro `skip` permite buscar mais itens sem carregar todo o catálogo de uma vez:
+A API também pode retornar campos adicionais. Consulte a documentação do DummyJSON e ajuste o tipo à resposta que realmente for utilizada.
+
+## 5. Consulte a API de forma assíncrona
+
+Crie `src/services/products.ts`. O exemplo abaixo busca uma página de produtos e verifica erros HTTP antes de interpretar a resposta:
 
 ```ts
 import type { Product } from '../types/Product';
 
 const API_URL = 'https://dummyjson.com/products';
 
-export async function fetchProducts(skip = 0, limit = 20) {
+type ProductsResponse = {
+  products: Product[];
+  total: number;
+  skip: number;
+  limit: number;
+};
+
+export async function fetchProducts(skip = 0, limit = 20): Promise<ProductsResponse> {
   const response = await fetch(`${API_URL}?limit=${limit}&skip=${skip}`);
-  if (!response.ok) throw new Error(`Falha ao carregar produtos (${response.status})`);
-  const data: { products: Product[]; total: number } = await response.json();
-  return data;
+
+  if (!response.ok) {
+    throw new Error(`Não foi possível carregar os produtos (HTTP ${response.status}).`);
+  }
+
+  return (await response.json()) as ProductsResponse;
 }
 ```
 
-Consulte a documentação da API para filtros e busca. Trate erros de rede na tela; não presuma que uma chamada sempre terá sucesso.
+Na tela, chame essa função com `async/await` dentro de `try/catch/finally`. Guarde o resultado em estado e apresente uma mensagem compreensível quando a rede falhar, com uma ação para tentar novamente. Não deixe a tela em carregamento infinito.
 
-## 5. Inicialize o SQLite
+Para a busca, consulte o endpoint de busca descrito na documentação da API. Considere debounce para evitar uma requisição a cada tecla e evite aplicar respostas antigas depois que o usuário já iniciou uma busca nova.
 
-Use `expo-sqlite` para criar tabelas locais, por exemplo, `favorites` e `cart_items`. Na inicialização do app, abra o banco e execute `CREATE TABLE IF NOT EXISTS`. Salve o identificador do produto e os campos necessários para exibi-lo offline.
+## 6. Crie a base SQLite
 
-Exemplo de esquema SQL:
+O catálogo vem da API; o SQLite pode guardar dados locais do usuário, como favoritos e carrinho. Inicialize o banco uma vez durante a preparação do app e crie as tabelas com `CREATE TABLE IF NOT EXISTS`.
+
+Exemplo de esquema:
 
 ```sql
 CREATE TABLE IF NOT EXISTS favorites (
@@ -122,66 +141,90 @@ CREATE TABLE IF NOT EXISTS cart_items (
 );
 ```
 
-Implemente funções separadas como `addFavorite`, `removeFavorite`, `listFavorites` e `addToCart`. Use consultas parametrizadas (`?`) em vez de concatenar valores recebidos do usuário. Teste o encerramento e reabertura do aplicativo para confirmar que os dados continuam salvos.
+Implemente operações separadas, por exemplo `addFavorite`, `removeFavorite`, `listFavorites` e `addToCart`. Use consultas parametrizadas (`?`) em vez de concatenar dados em SQL. Consulte a documentação da versão instalada do `expo-sqlite` para a API assíncrona e valide o comportamento no dispositivo/emulador.
 
-> A API fornece o catálogo; o SQLite guarda dados do usuário neste dispositivo. Para sincronização entre aparelhos ou vários usuários, use um backend com autenticação e banco remoto (por exemplo, Firebase) e nunca coloque chaves privadas no aplicativo.
+> Esse banco é local ao aparelho. Para sincronizar contas ou dados entre dispositivos, será necessário um backend e um banco remoto; não coloque credenciais privadas no aplicativo.
 
-## 6. Monte a navegação e as telas
+## 7. Monte a navegação e as telas
 
-Configure uma navegação em pilha com as rotas `Home` e `ProductDetails`. Na tela inicial, faça uma requisição quando a tela for aberta e apresente:
+Configure o `NavigationContainer` e um navegador em pilha com pelo menos estas rotas:
 
-- Título e identidade visual próprios.
-- Campo de busca e categorias.
-- Produtos em cartões com imagem, título e preço formatado em reais (`Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })`).
-- Ações para favoritar e adicionar ao carrinho.
+- **Home**: busca, categorias e lista de produtos.
+- **ProductDetails**: imagem, descrição completa, preço e ação para adicionar ao carrinho.
+- **Favorites/Cart**: opcional, para consultar e alterar os itens salvos.
 
-Ao tocar em um cartão, envie o produto selecionado à tela de detalhes, que deve exibir imagem, descrição completa, preço e ação de compra/carrinho.
+Na tela inicial, carregue os produtos ao entrar, mostre um indicador durante a requisição e apresente cartões com imagem, título e preço. Formate valores em reais:
 
-## 7. Implemente estados, erros e carregamento assíncrono
+```ts
+const priceLabel = new Intl.NumberFormat('pt-BR', {
+  style: 'currency',
+  currency: 'BRL',
+}).format(product.price);
+```
 
-Na tela inicial, mantenha estados distintos para produtos, carregamento, erro e paginação. Use `try/catch/finally` ao chamar `fetchProducts`; mostre uma mensagem compreensível e um botão **Tentar novamente** quando a chamada falhar. Evite iniciar a mesma requisição repetidamente enquanto outra ainda está em andamento.
+Ao tocar em um cartão, navegue para os detalhes passando o produto selecionado ou seu identificador. Se passar apenas o identificador, carregue os detalhes correspondentes e trate o caso em que o produto não existe.
 
-Use `FlatList` (em vez de criar uma lista longa de componentes dentro de `ScrollView`) e carregue a próxima página com `onEndReached`. A lista virtualizada renderiza itens conforme necessário — uma forma de carregamento eficiente/lazy loading. Exiba um indicador no rodapé durante a paginação e encerre quando `skip` atingir `total`.
+## 8. Trate estados, erros e carregamento sob demanda
 
-Para a busca, use o endpoint de busca da API e considere um pequeno debounce para não enviar uma chamada a cada tecla. Cancele requisições antigas com `AbortController` ou ignore respostas obsoletas, evitando que um resultado anterior sobrescreva a busca atual.
+Mantenha estados distintos para produtos, carregamento inicial, carregamento de próxima página e erro. Mostre também uma mensagem útil quando a API retornar uma lista vazia.
 
-## 8. Imagens e compressão
+Use `FlatList` para o catálogo, em vez de renderizar uma lista longa dentro de `ScrollView`. A `FlatList` virtualiza os itens e permite buscar mais dados quando o usuário se aproxima do fim usando `onEndReached`:
 
-Use `expo-image` para exibir imagens remotas com `contentFit="cover"`, dimensões definidas e placeholder enquanto carregam. Não baixe nem salve imagens em tamanho original se uma versão menor atender à interface.
+1. Inicie a busca com `skip = 0`.
+2. Acrescente os novos produtos à lista existente.
+3. Incremente `skip` pelo número de itens recebidos.
+4. Pare quando a quantidade carregada alcançar `total`.
+5. Evite iniciar duas paginações ao mesmo tempo.
 
-Se o usuário puder escolher/enviar uma imagem, redimensione-a antes de armazená-la ou enviá-la usando `expo-image-manipulator` (largura adequada à tela e JPEG com qualidade ajustada, por exemplo, entre `0.7` e `0.85`). Compare o tamanho antes e depois. Para fotos já hospedadas pelo DummyJSON, a compressão é responsabilidade do servidor; não há benefício em recomprimir no dispositivo apenas para exibir a imagem. Prefira thumbnails e cache.
+Isso reduz o trabalho inicial e implementa carregamento incremental (lazy loading) para o catálogo. Defina `keyExtractor` com o ID do produto e ajuste `onEndReachedThreshold` depois de testar em um aparelho real.
 
-## 9. Layout responsivo e rotação
+## 9. Exiba e otimize imagens
 
-Use `useWindowDimensions()` para obter largura/altura atualizadas quando o aparelho gira. Defina o número de colunas conforme o espaço disponível (por exemplo, uma coluna em telas estreitas e duas em telas maiores) e use `flexWrap`, espaçamentos relativos e limites de largura. Teste retrato e paisagem em pelo menos um emulador e um aparelho, verificando se texto, imagens, botões e detalhes continuam acessíveis.
+Use `expo-image` para mostrar imagens remotas com dimensões definidas, `contentFit="cover"` e um placeholder. Inclua fallback para URL ausente ou imagem que falhou ao carregar, para que um erro de imagem não quebre o cartão.
 
-## 10. Teste o aplicativo
+Evite armazenar imagens originais grandes sem necessidade. Se o app permitir escolher uma imagem, redimensione-a com `expo-image-manipulator` antes de salvar ou enviar, escolhendo dimensões compatíveis com o uso e um nível de qualidade adequado. A compressão é mais útil quando o app manipula imagens fornecidas pelo usuário; para imagens remotas do catálogo, prefira carregar uma resolução compatível com o espaço exibido.
 
-Execute `npx expo start` e valide os seguintes cenários:
+## 10. Adapte o layout à rotação
 
-- A lista carrega e a paginação traz mais produtos.
-- Busca sem resultados e busca com resultados.
-- Modo avião/erro da API mostra mensagem e permite tentar novamente.
-- Favoritar, remover favorito e alterar o carrinho; os dados permanecem após reiniciar.
-- Imagem ausente ou lenta não quebra o cartão.
-- Rotação da tela e diferentes tamanhos de aparelho.
-- Não há erros ou avisos relevantes no terminal/console.
+Use `useWindowDimensions()` para acompanhar mudanças de largura e altura quando a orientação muda. Com base na largura disponível, ajuste o número de colunas do catálogo, espaçamentos e tamanhos dos cartões. Garanta que textos, botões e imagens continuem acessíveis em telas estreitas e largas.
 
-## 11. Analise e registre a performance
+Teste retrato e paisagem em pelo menos um emulador ou dispositivo. Evite fixar larguras absolutas para todos os componentes.
 
-Faça medições em um aparelho/emulador representativo, preferencialmente em build de produção, não apenas no modo de desenvolvimento. Registre modelo do dispositivo, versão do sistema, versão do app, rede e condições do teste; faça mais de uma execução e anote os resultados e gargalos.
+## 11. Teste os principais cenários
 
-Para análise nativa Android, use o **Android Studio Profiler** para observar CPU, memória e rede durante a abertura, rolagem da lista e carregamento de imagens. Se também publicar uma versão web, use **Lighthouse no Chrome DevTools** e inclua o relatório da página web — Lighthouse não mede diretamente o desempenho de um app React Native nativo. Anexe capturas ou exportação do relatório e descreva pelo menos uma melhoria aplicada, como paginação, redução de imagens ou remoção de renders desnecessários.
+Execute `npx expo start` e valide manualmente:
 
-## 12. Prepare a entrega
+- A API carrega produtos e a paginação traz mais itens.
+- Busca com resultados e busca sem resultados.
+- Falha de rede/modo avião mostra erro e permite tentar novamente.
+- Favoritos e carrinho podem ser adicionados, removidos e persistem após reiniciar.
+- Imagem ausente ou lenta não impede o uso do catálogo.
+- Rotação e diferentes tamanhos de tela não cortam conteúdo.
+- Não há erros ou avisos relevantes no terminal ou no console do dispositivo.
 
-Antes da entrega, confira o README e o projeto, remova dados pessoais e segredos, e teste o procedimento do zero. Para compartilhar o código, compacte a pasta do projeto em `.zip` (sem `node_modules`) ou envie o projeto via Expo conforme solicitado pela disciplina. Inclua no material de entrega:
+## 12. Analise a performance e registre os resultados
 
-- Nome completo de cada integrante.
-- Instruções para instalar e executar.
-- Funcionalidades implementadas e serviços usados (API e banco).
-- Evidência dos testes e relatório de performance.
-- Data/prazo de entrega informado pela disciplina.
+Faça medições em um dispositivo/emulador representativo e informe se o teste foi feito em modo de desenvolvimento ou build de produção. Para cada execução, anote:
+
+- Modelo do dispositivo/emulador e versão do sistema operacional.
+- Versão do app e condições da rede.
+- Como reproduzir o teste (abertura, rolagem, busca ou carregamento de imagens).
+- Métricas observadas, problemas encontrados e melhorias realizadas.
+- Capturas de tela ou exportação do relatório como evidência.
+
+Para Android, use o **Android Studio Profiler** para observar CPU, memória e rede durante a abertura e a rolagem. Se o projeto também tiver uma versão web publicada, o **Lighthouse** pode complementar a análise dessa versão; ele não substitui a medição do app nativo. Inclua o relatório real obtido pela equipe na entrega — não invente métricas.
+
+## 13. Prepare a entrega
+
+Antes de entregar, teste o projeto a partir de uma instalação limpa, remova dados pessoais e segredos e confira se as instruções funcionam. Para gerar um ZIP, não inclua `node_modules`; o avaliador pode restaurar dependências com `npm install`.
+
+Inclua na documentação/entrega:
+
+- Nome completo de todos os integrantes.
+- Como instalar e executar o app.
+- Funcionalidades implementadas, API e banco utilizados.
+- Evidências dos testes e relatório de performance.
+- O arquivo ZIP ou as instruções de acesso ao projeto Expo, conforme solicitado pela disciplina.
 
 ## Referências
 
