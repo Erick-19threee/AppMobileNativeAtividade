@@ -1,77 +1,103 @@
 # Vitrine Mobile — guia para criar um app de vendas
 
-Este README apresenta um passo a passo para desenvolver um aplicativo de catálogo de produtos com **React Native, Expo e TypeScript**. O exemplo usa a API pública do [DummyJSON](https://dummyjson.com/docs/products) para obter produtos e o **SQLite local** para salvar favoritos e itens do carrinho.
+Passo a passo para criar no **Expo Snack** um aplicativo de catálogo de produtos com **React Native**. O app consulta produtos pela API pública do [DummyJSON](https://dummyjson.com/docs/products) e usa **Firebase Cloud Firestore** para salvar favoritos e itens do carrinho.
 
-> A proposta é servir como ponto de partida para um projeto original. Personalize o nome, o visual, as categorias e as funcionalidades; não copie a identidade de uma loja existente.
+> Personalize o nome, o visual, as categorias e o conteúdo para criar uma experiência original. Não copie a identidade de uma loja existente.
 
-## O que o app deverá ter
+## O que será construído
 
 - Tela inicial com busca, categorias e catálogo de produtos.
 - Imagens, preços e descrições dos produtos, além de uma tela de detalhes.
-- API para consultar os produtos e paginação para carregar mais itens sob demanda.
-- Banco SQLite local para favoritos e carrinho.
-- Tratamento de carregamento, erros de rede e listas vazias.
+- Consulta assíncrona à API DummyJSON com paginação e tratamento de erros.
+- Favoritos e carrinho salvos no Cloud Firestore.
+- Carregamento incremental da lista (lazy loading).
 - Layout que se adapta a diferentes tamanhos de tela e à rotação.
 - Imagens dimensionadas para a tela e, se houver upload, comprimidas antes do envio.
 - Testes e relatório de análise de performance.
 
-## 1. Prepare o ambiente
+## 1. Crie o app no Expo Snack
 
-Instale [Node.js LTS](https://nodejs.org/), Git e o [Expo Go](https://expo.dev/go) no celular. Também é possível executar o projeto em um emulador Android ou iOS; para builds nativos, siga os requisitos da plataforma na documentação do Expo.
+1. Acesse [snack.expo.dev](https://snack.expo.dev/) e entre com sua conta Expo.
+2. Crie um Snack novo e escolha um template React Native. O Snack já permite editar e executar o código no navegador, sem instalar Node.js no computador.
+3. Renomeie o projeto e edite `App.js` ou `App.tsx`, conforme o template escolhido.
+4. Use a área **Dependencies** para adicionar os pacotes necessários. Para este guia, adicione `firebase` e `expo-image` (se optar por usar essa biblioteca).
+5. Abra a prévia web ou escaneie o QR code com o Expo Go. Confira as dependências e limitações atuais do Snack antes de adicionar bibliotecas: módulos nativos que exigem configuração nativa própria podem não funcionar nele.
 
-Confira as instalações:
+Salve o Snack na sua conta e use a opção de compartilhar para enviar o link do projeto. Faça cópias/versões durante o desenvolvimento para não perder alterações.
 
-```bash
-node --version
-npm --version
+## 2. Configure o Firebase
+
+1. Acesse o [Firebase Console](https://console.firebase.google.com/) e crie um projeto.
+2. Adicione um app **Web** ao projeto Firebase. Copie os dados de configuração que o console fornecer.
+3. No menu **Build → Authentication**, habilite o provedor **Anonymous**. Ele permite identificar cada instalação/usuário sem criar uma tela de cadastro para o protótipo.
+4. No menu **Build → Firestore Database**, crie um banco Cloud Firestore. Escolha a região adequada e comece em modo de produção, configurando as regras a seguir.
+5. No Snack, adicione a dependência `firebase` e configure a conexão usando o objeto de configuração do app Web.
+
+Crie `firebase.js` (ou coloque inicialmente esse código em `App.js`) e substitua os valores pelos do seu projeto:
+
+```js
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously } from 'firebase/auth';
+import { getFirestore } from 'firebase/firestore';
+
+const firebaseConfig = {
+  apiKey: 'SUA_API_KEY',
+  authDomain: 'SEU_PROJETO.firebaseapp.com',
+  projectId: 'SEU_PROJECT_ID',
+  storageBucket: 'SEU_PROJETO.appspot.com',
+  messagingSenderId: 'SEU_SENDER_ID',
+  appId: 'SEU_APP_ID',
+};
+
+const app = initializeApp(firebaseConfig);
+export const auth = getAuth(app);
+export const db = getFirestore(app);
+
+export async function entrarComoVisitante() {
+  const credencial = await signInAnonymously(auth);
+  return credencial.user.uid;
+}
 ```
 
-## 2. Crie o projeto e instale as dependências
+Os valores de configuração de um app Firebase Web são enviados ao cliente e não substituem regras de segurança. Proteja os dados com Authentication e regras do Firestore; nunca publique credenciais de servidor ou chaves privadas no Snack.
 
-No terminal, navegue até a pasta onde deseja guardar o projeto e execute:
+### Regras do Firestore
 
-```bash
-npx create-expo-app@latest vitrine-mobile --template blank-typescript
-cd vitrine-mobile
+Com a autenticação anônima habilitada, uma regra pode limitar o acesso aos dados do usuário autenticado. No console, publique regras como estas e teste-as com o simulador de regras:
+
+```text
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId}/{document=**} {
+      allow read, write: if request.auth != null
+                        && request.auth.uid == userId;
+    }
+  }
+}
 ```
 
-Instale as bibliotecas usadas no exemplo:
-
-```bash
-npx expo install expo-sqlite expo-image expo-image-manipulator
-npm install @react-navigation/native @react-navigation/native-stack
-npx expo install react-native-screens react-native-safe-area-context
-```
-
-Inicie o servidor de desenvolvimento:
-
-```bash
-npx expo start
-```
-
-Leia o QR code com o Expo Go, ou escolha um emulador disponível no terminal do Expo.
+Essa regra só permite que o usuário autenticado leia e altere documentos dentro do próprio caminho `users/{uid}`. Não use regras abertas como `allow read, write: if true` em um app compartilhado ou publicado. A autenticação anônima identifica instalações, mas não oferece recuperação de conta como um cadastro convencional.
 
 ## 3. Organize o código
 
-Crie pastas para separar telas, componentes e integrações. Por exemplo:
+Mesmo que o protótipo comece em um único arquivo no Snack, separe as responsabilidades em arquivos quando o projeto crescer. Use o menu de arquivos do Snack para adicionar módulos, se disponível no template:
 
 ```text
-vitrine-mobile/
-├── App.tsx
-└── src/
-    ├── components/       # Cartão de produto, busca, mensagens de estado
-    ├── database/         # Inicialização e operações SQLite
-    ├── navigation/       # Rotas e tipos da navegação
-    ├── screens/          # Início, detalhes e favoritos/carrinho
-    ├── services/         # Requisições HTTP à API
-    └── types/            # Tipos TypeScript compartilhados
+App.js
+src/
+├── components/       # Cartão de produto, busca e mensagens de estado
+├── screens/          # Início, detalhes e favoritos/carrinho
+├── services/         # Requisições HTTP à API
+├── firebase/         # Configuração e operações do Firebase
+└── types/            # Tipos, caso use TypeScript
 ```
 
-Mantenha as telas focadas na interface. Deixe requisições HTTP em `services/` e consultas ao banco em `database/`; isso facilita testar e manter o aplicativo.
+Mantenha a interface, as chamadas à API e as operações do Firestore separadas. Isso facilita entender, testar e corrigir o app.
 
-## 4. Modele os produtos
+## 4. Modele os produtos e consulte a API
 
-Crie `src/types/Product.ts` com os campos necessários para exibir um produto:
+Crie `src/types/Product.ts` se estiver usando TypeScript:
 
 ```ts
 export type Product = {
@@ -85,11 +111,7 @@ export type Product = {
 };
 ```
 
-A API também pode retornar campos adicionais. Consulte a documentação do DummyJSON e ajuste o tipo à resposta que realmente for utilizada.
-
-## 5. Consulte a API de forma assíncrona
-
-Crie `src/services/products.ts`. O exemplo abaixo busca uma página de produtos e verifica erros HTTP antes de interpretar a resposta:
+Crie `src/services/products.ts` para obter uma página de produtos. O parâmetro `skip` permite carregar mais resultados sem buscar o catálogo inteiro de uma vez:
 
 ```ts
 import type { Product } from '../types/Product';
@@ -105,133 +127,119 @@ type ProductsResponse = {
 
 export async function fetchProducts(skip = 0, limit = 20): Promise<ProductsResponse> {
   const response = await fetch(`${API_URL}?limit=${limit}&skip=${skip}`);
-
   if (!response.ok) {
-    throw new Error(`Não foi possível carregar os produtos (HTTP ${response.status}).`);
+    throw new Error(`Falha ao carregar produtos (HTTP ${response.status}).`);
   }
-
   return (await response.json()) as ProductsResponse;
 }
 ```
 
-Na tela, chame essa função com `async/await` dentro de `try/catch/finally`. Guarde o resultado em estado e apresente uma mensagem compreensível quando a rede falhar, com uma ação para tentar novamente. Não deixe a tela em carregamento infinito.
+Se o Snack estiver usando JavaScript, remova as anotações de tipo TypeScript. Consulte a documentação do DummyJSON para busca e demais parâmetros.
 
-Para a busca, consulte o endpoint de busca descrito na documentação da API. Considere debounce para evitar uma requisição a cada tecla e evite aplicar respostas antigas depois que o usuário já iniciou uma busca nova.
+## 5. Salve favoritos e carrinho no Firestore
 
-## 6. Crie a base SQLite
+O exemplo abaixo grava um favorito no caminho do usuário autenticado. Crie funções semelhantes para remover/listar favoritos e adicionar, atualizar ou remover itens do carrinho:
 
-O catálogo vem da API; o SQLite pode guardar dados locais do usuário, como favoritos e carrinho. Inicialize o banco uma vez durante a preparação do app e crie as tabelas com `CREATE TABLE IF NOT EXISTS`.
+```js
+import { doc, setDoc, deleteDoc, getDocs, collection } from 'firebase/firestore';
+import { db } from './firebase';
 
-Exemplo de esquema:
+export async function salvarFavorito(uid, product) {
+  const favoritoRef = doc(db, 'users', uid, 'favorites', String(product.id));
+  await setDoc(favoritoRef, {
+    productId: product.id,
+    title: product.title,
+    price: product.price,
+    thumbnail: product.thumbnail,
+  });
+}
 
-```sql
-CREATE TABLE IF NOT EXISTS favorites (
-  product_id INTEGER PRIMARY KEY,
-  title TEXT NOT NULL,
-  price REAL NOT NULL,
-  thumbnail TEXT NOT NULL
-);
+export async function removerFavorito(uid, productId) {
+  await deleteDoc(doc(db, 'users', uid, 'favorites', String(productId)));
+}
 
-CREATE TABLE IF NOT EXISTS cart_items (
-  product_id INTEGER PRIMARY KEY,
-  title TEXT NOT NULL,
-  price REAL NOT NULL,
-  thumbnail TEXT NOT NULL,
-  quantity INTEGER NOT NULL DEFAULT 1
-);
+export async function listarFavoritos(uid) {
+  const snapshot = await getDocs(collection(db, 'users', uid, 'favorites'));
+  return snapshot.docs.map((item) => item.data());
+}
 ```
 
-Implemente operações separadas, por exemplo `addFavorite`, `removeFavorite`, `listFavorites` e `addToCart`. Use consultas parametrizadas (`?`) em vez de concatenar dados em SQL. Consulte a documentação da versão instalada do `expo-sqlite` para a API assíncrona e valide o comportamento no dispositivo/emulador.
+Chame `entrarComoVisitante()` no início do app, dentro de `try/catch`, e guarde o `uid` retornado em estado. Só execute operações de favorito/carrinho depois que esse identificador estiver disponível. Trate erros de rede e de permissão do Firebase com uma mensagem e uma opção para tentar novamente.
 
-> Esse banco é local ao aparelho. Para sincronizar contas ou dados entre dispositivos, será necessário um backend e um banco remoto; não coloque credenciais privadas no aplicativo.
+Considere salvar no carrinho os campos necessários para exibição, como identificador, título, preço, imagem e quantidade. O catálogo pode continuar vindo da API; o Firestore guarda os dados do usuário e, se desejado, também pode ser usado como fonte de produtos cadastrados pela equipe.
 
-## 7. Monte a navegação e as telas
+## 6. Monte a tela inicial e os detalhes
 
-Configure o `NavigationContainer` e um navegador em pilha com pelo menos estas rotas:
+A tela inicial deve apresentar o nome e a identidade visual do projeto, campo de busca, categorias e cartões de produto. Cada cartão pode mostrar imagem, título e preço. Formate o preço em reais:
 
-- **Home**: busca, categorias e lista de produtos.
-- **ProductDetails**: imagem, descrição completa, preço e ação para adicionar ao carrinho.
-- **Favorites/Cart**: opcional, para consultar e alterar os itens salvos.
-
-Na tela inicial, carregue os produtos ao entrar, mostre um indicador durante a requisição e apresente cartões com imagem, título e preço. Formate valores em reais:
-
-```ts
-const priceLabel = new Intl.NumberFormat('pt-BR', {
+```js
+const precoFormatado = new Intl.NumberFormat('pt-BR', {
   style: 'currency',
   currency: 'BRL',
 }).format(product.price);
 ```
 
-Ao tocar em um cartão, navegue para os detalhes passando o produto selecionado ou seu identificador. Se passar apenas o identificador, carregue os detalhes correspondentes e trate o caso em que o produto não existe.
+Ao tocar em um produto, abra uma tela ou modal de detalhes com imagem, descrição completa, preço e botão para adicionar aos favoritos ou ao carrinho. Se usar navegação, organize as rotas Home, Detalhes e Favoritos/Carrinho. Valide o produto recebido e mostre estado de erro se os dados não estiverem disponíveis.
 
-## 8. Trate estados, erros e carregamento sob demanda
+## 7. Trate erros, estados assíncronos e lazy loading
 
-Mantenha estados distintos para produtos, carregamento inicial, carregamento de próxima página e erro. Mostre também uma mensagem útil quando a API retornar uma lista vazia.
+Mantenha estados separados para lista, carregamento, erro e paginação. Use `try/catch/finally` nas chamadas assíncronas. Mostre indicador durante o carregamento, mensagem útil se a API ou o Firebase falhar e estado vazio quando não houver resultados.
 
-Use `FlatList` para o catálogo, em vez de renderizar uma lista longa dentro de `ScrollView`. A `FlatList` virtualiza os itens e permite buscar mais dados quando o usuário se aproxima do fim usando `onEndReached`:
+Use `FlatList` para o catálogo, em vez de uma lista longa dentro de `ScrollView`. Configure `keyExtractor` com o ID e use `onEndReached` para solicitar a página seguinte:
 
-1. Inicie a busca com `skip = 0`.
-2. Acrescente os novos produtos à lista existente.
-3. Incremente `skip` pelo número de itens recebidos.
+1. Comece com `skip = 0`.
+2. Acrescente os novos produtos à lista atual.
+3. Atualize `skip` com a quantidade recebida.
 4. Pare quando a quantidade carregada alcançar `total`.
-5. Evite iniciar duas paginações ao mesmo tempo.
+5. Evite iniciar várias requisições ao mesmo tempo.
 
-Isso reduz o trabalho inicial e implementa carregamento incremental (lazy loading) para o catálogo. Defina `keyExtractor` com o ID do produto e ajuste `onEndReachedThreshold` depois de testar em um aparelho real.
+Para a busca, use o endpoint de busca da API e considere um pequeno debounce. Evite que respostas antigas sobrescrevam resultados de uma busca mais recente.
 
-## 9. Exiba e otimize imagens
+## 8. Imagens e responsividade
 
-Use `expo-image` para mostrar imagens remotas com dimensões definidas, `contentFit="cover"` e um placeholder. Inclua fallback para URL ausente ou imagem que falhou ao carregar, para que um erro de imagem não quebre o cartão.
+Use imagens com tamanho definido e modo de preenchimento adequado (`cover`), placeholder e fallback para falha de carregamento. Evite baixar imagens maiores do que o necessário para o cartão. Se o app permitir escolher imagens, redimensione e comprima antes de enviar ao Firebase Storage; lembre-se de configurar regras de acesso ao Storage também.
 
-Evite armazenar imagens originais grandes sem necessidade. Se o app permitir escolher uma imagem, redimensione-a com `expo-image-manipulator` antes de salvar ou enviar, escolhendo dimensões compatíveis com o uso e um nível de qualidade adequado. A compressão é mais útil quando o app manipula imagens fornecidas pelo usuário; para imagens remotas do catálogo, prefira carregar uma resolução compatível com o espaço exibido.
+Use `useWindowDimensions()` para acompanhar mudanças de largura e altura. Ajuste número de colunas, espaçamento e dimensões dos cartões de acordo com o espaço disponível. Teste retrato e paisagem na prévia do Snack e em um aparelho real.
 
-## 10. Adapte o layout à rotação
+## 9. Teste o aplicativo
 
-Use `useWindowDimensions()` para acompanhar mudanças de largura e altura quando a orientação muda. Com base na largura disponível, ajuste o número de colunas do catálogo, espaçamentos e tamanhos dos cartões. Garanta que textos, botões e imagens continuem acessíveis em telas estreitas e largas.
+Valide estes cenários no Snack e no Expo Go:
 
-Teste retrato e paisagem em pelo menos um emulador ou dispositivo. Evite fixar larguras absolutas para todos os componentes.
-
-## 11. Teste os principais cenários
-
-Execute `npx expo start` e valide manualmente:
-
-- A API carrega produtos e a paginação traz mais itens.
-- Busca com resultados e busca sem resultados.
-- Falha de rede/modo avião mostra erro e permite tentar novamente.
-- Favoritos e carrinho podem ser adicionados, removidos e persistem após reiniciar.
-- Imagem ausente ou lenta não impede o uso do catálogo.
+- A API carrega produtos e a paginação carrega mais resultados.
+- Busca com resultados e sem resultados.
+- Falha de rede mostra mensagem e permite tentar novamente.
+- A autenticação anônima inicia e o usuário consegue salvar/remover favoritos.
+- Dados de um usuário não podem ser acessados por outro, conforme as regras do Firestore.
+- Erros ou falta de permissão do Firebase não encerram o app.
+- Imagem ausente ou lenta não quebra o catálogo.
 - Rotação e diferentes tamanhos de tela não cortam conteúdo.
-- Não há erros ou avisos relevantes no terminal ou no console do dispositivo.
 
-## 12. Analise a performance e registre os resultados
+## 10. Analise e registre a performance
 
-Faça medições em um dispositivo/emulador representativo e informe se o teste foi feito em modo de desenvolvimento ou build de produção. Para cada execução, anote:
+Meça o app em aparelho/emulador representativo e registre modelo do dispositivo, versão do sistema, versão do app, condições da rede e passos usados para reproduzir o teste. Observe abertura, rolagem da lista, busca e carregamento de imagens; anote resultados, problemas e melhorias, incluindo capturas de tela ou exportação do relatório.
 
-- Modelo do dispositivo/emulador e versão do sistema operacional.
-- Versão do app e condições da rede.
-- Como reproduzir o teste (abertura, rolagem, busca ou carregamento de imagens).
-- Métricas observadas, problemas encontrados e melhorias realizadas.
-- Capturas de tela ou exportação do relatório como evidência.
+Para Android nativo, use o **Android Studio Profiler** para observar CPU, memória e rede. O **Lighthouse** é adequado para a versão web do Snack, mas não substitui uma análise de performance do app nativo. Inclua o relatório real da equipe; não invente métricas.
 
-Para Android, use o **Android Studio Profiler** para observar CPU, memória e rede durante a abertura e a rolagem. Se o projeto também tiver uma versão web publicada, o **Lighthouse** pode complementar a análise dessa versão; ele não substitui a medição do app nativo. Inclua o relatório real obtido pela equipe na entrega — não invente métricas.
+## 11. Prepare a entrega
 
-## 13. Prepare a entrega
+Salve o projeto no Snack e compartilhe o link, conforme solicitado pela disciplina. Se também for entregar o código ZIP, inclua os arquivos do projeto e instruções para executar, mas não inclua dependências instaladas desnecessárias. Confira se o link do Snack está acessível para quem vai avaliar e não publique dados pessoais ou credenciais privadas.
 
-Antes de entregar, teste o projeto a partir de uma instalação limpa, remova dados pessoais e segredos e confira se as instruções funcionam. Para gerar um ZIP, não inclua `node_modules`; o avaliador pode restaurar dependências com `npm install`.
-
-Inclua na documentação/entrega:
+Inclua na entrega:
 
 - Nome completo de todos os integrantes.
-- Como instalar e executar o app.
-- Funcionalidades implementadas, API e banco utilizados.
+- Link do Snack e instruções de uso.
+- Funcionalidades implementadas, API e serviços Firebase utilizados.
 - Evidências dos testes e relatório de performance.
-- O arquivo ZIP ou as instruções de acesso ao projeto Expo, conforme solicitado pela disciplina.
+- Arquivo ZIP, se solicitado.
 
 ## Referências
 
+- [Expo Snack](https://snack.expo.dev/)
 - [Documentação do Expo](https://docs.expo.dev/)
-- [Expo SQLite](https://docs.expo.dev/versions/latest/sdk/sqlite/)
-- [Expo Image](https://docs.expo.dev/versions/latest/sdk/image/)
-- [Expo ImageManipulator](https://docs.expo.dev/versions/latest/sdk/imagemanipulator/)
+- [Firebase para JavaScript](https://firebase.google.com/docs/web/setup)
+- [Cloud Firestore](https://firebase.google.com/docs/firestore)
+- [Firebase Authentication — login anônimo](https://firebase.google.com/docs/auth/web/anonymous-auth)
+- [Regras de segurança do Firestore](https://firebase.google.com/docs/firestore/security/get-started)
 - [React Native — FlatList](https://reactnative.dev/docs/flatlist)
 - [DummyJSON — Products API](https://dummyjson.com/docs/products)
 - [Android Studio Profiler](https://developer.android.com/studio/profile)
