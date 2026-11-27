@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "dunkiverse",
+    "slug": "dunkiverse - dive into universe",
+    "version": "1.0.0",
+    "orientation": "default",
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
+    "splash": {
+      "backgroundColor": "#F7F5F0"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#F7F5F0"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-status-bar"
+    ]
+  }
+}
